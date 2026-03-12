@@ -344,7 +344,7 @@ def show_evaluation_page(app):
 
     tk.Label(
         left_header,
-        text="Create and manage evaluation schedules in a simple and elegant way.",
+        text="Create and manage evaluation schedules.",
         font=("Segoe UI", 10),
         fg=TEXT_MUTED,
         bg=CONTENT_BG

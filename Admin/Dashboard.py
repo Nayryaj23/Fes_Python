@@ -1,5 +1,9 @@
 import tkinter as tk
+import subprocess
+import sys
+import os
 from tkinter import messagebox
+
 
 from Admin.Pages import faculty_page
 from sidebar import Sidebar
@@ -9,6 +13,7 @@ from Admin.Pages.evaluation_form_page import show_evaluation_form_page
 from Admin.Pages.criteria_page import show_criteria_page
 from Admin.Pages.evaluation_page import show_evaluation_page
 from Admin.Pages.question_page import show_question_page
+from Admin.Pages.class_data_upload_page import show_class_data_upload_page
 # from Admin.Pages.faculty_page import show_faculty_page
 # from Admin.Pages.student_page import show_student_page
 
@@ -73,7 +78,7 @@ class DashboardApp:
             title="Admin Panel",
             menu_items={
                 "Main": ["Dashboard"],
-                "Management": ["Evaluation Form","Criteria", "Question", "Evaluation"],
+                "Management": ["Evaluation Form","Criteria", "Question", "Class Data Upload", "Evaluation"],
                 "People": ["Faculty", "Students"],
             },
             on_menu_click=self.handle_menu_click,
@@ -128,6 +133,8 @@ class DashboardApp:
             self.show_criteria()
         elif item == "Question":
             self.show_question()
+        elif item == "Class Data Upload":
+            self.show_class_data_upload()
         elif item == "Evaluation":
             self.show_evaluation()
         elif item == "Faculty":
@@ -153,6 +160,10 @@ class DashboardApp:
         self.clear_content()
         show_question_page(self)
 
+    def show_class_data_upload(self):
+        self.clear_content()
+        show_class_data_upload_page(self)
+
     def show_evaluation(self):
         self.clear_content()
         show_evaluation_page(self)
@@ -165,11 +176,21 @@ class DashboardApp:
         self.clear_content()
         show_student_page(self)
 
-
     def logout(self):
         confirm = messagebox.askyesno("Logout", "Are you sure you want to logout?")
+
         if confirm:
+            # Close dashboard window
             self.root.destroy()
+
+            # Get project root (one level above Admin)
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+            # Build path to login.py
+            login_path = os.path.join(base_dir, "login.py")
+
+            # Open login window again
+            subprocess.Popen([sys.executable, login_path])
 
 
 if __name__ == "__main__":
