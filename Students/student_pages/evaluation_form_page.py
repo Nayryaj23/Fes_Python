@@ -20,11 +20,7 @@ ROW_ALT = "#fcf7f7"
 MISSING_BG = "#fff2f2"
 
 
-# =========================
-# DATABASE HELPERS
-# =========================
-
-def get_active_period_for_class_offering(class_offering_id):
+def get_open_evaluation_period_for_class_offering(class_offering_id):
     conn = get_connection()
     if conn is None:
         return None
@@ -36,30 +32,29 @@ def get_active_period_for_class_offering(class_offering_id):
                 ep.id AS evaluation_period_id,
                 ep.form_id,
                 ep.term_id,
-                sy.year_label,
-                sem.name AS semester_name
+                ep.status,
+                ep.starts_at,
+                ep.ends_at
             FROM class_offerings co
-            INNER JOIN terms t ON t.id = co.term_id
-            INNER JOIN school_years sy ON sy.id = t.school_year_id
-            INNER JOIN semesters sem ON sem.id = t.semester_id
-            INNER JOIN evaluation_periods ep ON ep.term_id = co.term_id
+            INNER JOIN evaluation_periods ep
+                ON ep.term_id = co.term_id
             WHERE co.id = %s
               AND ep.status = 'open'
-            ORDER BY ep.id DESC
+            ORDER BY ep.starts_at DESC, ep.id DESC
             LIMIT 1
         """
         cursor.execute(query, (class_offering_id,))
         return cursor.fetchone()
     except Exception as e:
-        print("get_active_period_for_class_offering error:", e)
+        print("get_open_evaluation_period_for_class_offering error:", e)
         return None
     finally:
         conn.close()
 
 
 def create_or_get_evaluation(student_id, class_offering_id):
-    active_period = get_active_period_for_class_offering(class_offering_id)
-    if not active_period:
+    period = get_open_evaluation_period_for_class_offering(class_offering_id)
+    if not period:
         return None
 
     conn = get_connection()
@@ -79,7 +74,7 @@ def create_or_get_evaluation(student_id, class_offering_id):
         """, (
             student_id,
             class_offering_id,
-            active_period["evaluation_period_id"]
+            period["evaluation_period_id"]
         ))
         existing = cursor.fetchone()
 
@@ -88,9 +83,10 @@ def create_or_get_evaluation(student_id, class_offering_id):
                 "evaluation_id": existing["id"],
                 "status": existing["status"],
                 "evaluation_period_id": existing["evaluation_period_id"],
-                "form_id": active_period["form_id"],
-                "year_label": active_period["year_label"],
-                "semester_name": active_period["semester_name"],
+                "form_id": period["form_id"],
+                "starts_at": period["starts_at"],
+                "ends_at": period["ends_at"],
+                "period_status": period["status"],
             }
 
         cursor.execute("""
@@ -104,7 +100,7 @@ def create_or_get_evaluation(student_id, class_offering_id):
             )
             VALUES (%s, %s, %s, 'draft', NOW(), NOW())
         """, (
-            active_period["evaluation_period_id"],
+            period["evaluation_period_id"],
             class_offering_id,
             student_id
         ))
@@ -113,10 +109,11 @@ def create_or_get_evaluation(student_id, class_offering_id):
         return {
             "evaluation_id": cursor.lastrowid,
             "status": "draft",
-            "evaluation_period_id": active_period["evaluation_period_id"],
-            "form_id": active_period["form_id"],
-            "year_label": active_period["year_label"],
-            "semester_name": active_period["semester_name"],
+            "evaluation_period_id": period["evaluation_period_id"],
+            "form_id": period["form_id"],
+            "starts_at": period["starts_at"],
+            "ends_at": period["ends_at"],
+            "period_status": period["status"],
         }
 
     except Exception as e:
@@ -287,6 +284,29 @@ def submit_evaluation(evaluation_id):
     finally:
         conn.close()
 
+# def submit_evaluation(evaluation_id):
+#     conn = get_connection()
+#     if conn is None:
+#         return False
+#
+#     try:
+#         cursor = conn.cursor()
+#         cursor.execute("""
+#             UPDATE evaluations
+#             SET status = 'submitted',
+#                 submitted_at = NOW(),
+#                 updated_at = NOW()
+#             WHERE id = %s
+#         """, (evaluation_id,))
+#         conn.commit()
+#         return True
+#     except Exception as e:
+#         conn.rollback()
+#         print("submit_evaluation error:", e)
+#         return False
+#     finally:
+#         conn.close()
+
 
 # =========================
 # UI HELPERS
@@ -413,7 +433,7 @@ def show_evaluation_form(app, subject_item, preview=False):
     if not evaluation_data:
         messagebox.showwarning(
             "Evaluation Unavailable",
-            "There is no active/open evaluation period for this subject's school year and semester."
+            "There is no open evaluation period for this subject."
         )
         app.show_my_evaluations()
         return
@@ -470,9 +490,11 @@ def show_evaluation_form(app, subject_item, preview=False):
         bg=CARD_BG
     ).grid(row=2, column=0, sticky="w", padx=20, pady=(0, 4))
 
+    period_text = f"Period: {evaluation_data['starts_at']} to {evaluation_data['ends_at']}"
+
     tk.Label(
         header_card,
-        text=f"Active Period: {evaluation_data['year_label']} | {evaluation_data['semester_name']}",
+        text=period_text,
         font=("Segoe UI", 10),
         fg=TEXT_MUTED,
         bg=CARD_BG

@@ -1,6 +1,9 @@
 import tkinter as tk
 from tkinter import messagebox
 from sidebar import Sidebar
+import subprocess
+import sys
+import os
 
 from Students.student_pages.dashboard_page import show_dashboard_page
 from Students.student_pages.evaluations_page import show_evaluations_page
@@ -52,7 +55,6 @@ class StudentDashboardApp:
             menu_items={
                 "Main": ["Dashboard"],
                 "Evaluation": ["My Evaluations", "Results"],
-                # "Academic": ["My Subjects"],
                 "Account": ["Profile"]
             },
             on_menu_click=self.handle_menu_click,
@@ -74,7 +76,7 @@ class StudentDashboardApp:
             fg=TEXT_DARK,
             bg=TOPBAR_BG
         )
-        self.page_title.pack(side="left", padx=25, pady=15)
+        # self.page_title.pack(side="left", padx=25, pady=15)
 
         self.user_label = tk.Label(
             self.topbar,
@@ -112,9 +114,6 @@ class StudentDashboardApp:
         elif item == "Results":
             self.sidebar.set_active(item)
             self.show_results()
-        # elif item == "My Subjects":
-        #     self.sidebar.set_active(item)
-        #     self.show_my_subjects()
         elif item == "Profile":
             self.sidebar.set_active(item)
             self.show_profile()
@@ -178,6 +177,11 @@ class StudentDashboardApp:
             conn.close()
 
     def fetch_student_subjects(self):
+        """
+        Fetch only enrolled subjects that have an OPEN evaluation period.
+        If no open evaluation period exists for the subject's term,
+        it will not be shown in My Evaluations.
+        """
         conn = get_connection()
         if conn is None:
             return []
@@ -187,14 +191,26 @@ class StudentDashboardApp:
             query = """
                 SELECT
                     co.id AS class_offering_id,
+                    co.term_id,
                     s.subject_code,
                     s.descriptive_title,
-                    CONCAT(COALESCE(up.first_name, ''), ' ', COALESCE(up.last_name, '')) AS faculty_name
+                    CONCAT(COALESCE(up.first_name, ''), ' ', COALESCE(up.last_name, '')) AS faculty_name,
+                    ep.id AS open_evaluation_period_id,
+                    ep.starts_at AS evaluation_starts_at,
+                    ep.ends_at AS evaluation_ends_at,
+                    ep.status AS evaluation_period_status
                 FROM class_enrollments ce
-                INNER JOIN class_offerings co ON co.id = ce.class_offering_id
-                INNER JOIN subjects s ON s.id = co.subject_id
-                INNER JOIN users fu ON fu.id = co.faculty_id
-                LEFT JOIN user_profiles up ON up.user_id = fu.id
+                INNER JOIN class_offerings co
+                    ON co.id = ce.class_offering_id
+                INNER JOIN subjects s
+                    ON s.id = co.subject_id
+                INNER JOIN users fu
+                    ON fu.id = co.faculty_id
+                LEFT JOIN user_profiles up
+                    ON up.user_id = fu.id
+                INNER JOIN evaluation_periods ep
+                    ON ep.term_id = co.term_id
+                   AND ep.status = 'open'
                 WHERE ce.student_id = %s
                   AND ce.status = 'enrolled'
                 ORDER BY s.subject_code ASC
@@ -209,10 +225,6 @@ class StudentDashboardApp:
             conn.close()
 
     def fetch_student_evaluations(self):
-        """
-        Fetch only evaluations that match an active/open evaluation period
-        for the same term/SY/semester context of the class offering.
-        """
         conn = get_connection()
         if conn is None:
             return []
@@ -226,6 +238,9 @@ class StudentDashboardApp:
                     e.evaluation_period_id,
                     e.status,
                     e.submitted_at,
+                    ep.starts_at,
+                    ep.ends_at,
+                    ep.status AS period_status,
                     s.subject_code,
                     s.descriptive_title,
                     CONCAT(COALESCE(up.first_name, ''), ' ', COALESCE(up.last_name, '')) AS faculty_name
@@ -241,8 +256,7 @@ class StudentDashboardApp:
                 LEFT JOIN user_profiles up
                     ON up.user_id = fu.id
                 WHERE e.student_id = %s
-                  AND ep.status IN ('open', 'closed', 'draft')
-                ORDER BY e.created_at DESC
+                ORDER BY ep.starts_at DESC, e.created_at DESC
             """
             cursor.execute(query, (self.student_id,))
             return cursor.fetchall()
@@ -254,15 +268,24 @@ class StudentDashboardApp:
             conn.close()
 
     def get_evaluation_for_subject(self, class_offering_id):
-        """
-        Returns the latest evaluation record for this class offering.
-        """
-        for evaluation in self.evaluations_data:
-            if evaluation["class_offering_id"] == class_offering_id:
-                return evaluation
-        return None
+        matching = [
+            evaluation for evaluation in self.evaluations_data
+            if evaluation["class_offering_id"] == class_offering_id
+        ]
+
+        if not matching:
+            return None
+
+        return matching[0]
 
     def open_evaluation(self, subject_item):
+        if not subject_item.get("open_evaluation_period_id"):
+            messagebox.showwarning(
+                "Evaluation Unavailable",
+                "There is no open evaluation period for this subject."
+            )
+            return
+
         evaluation = self.get_evaluation_for_subject(subject_item["class_offering_id"])
 
         if evaluation and evaluation["status"] == "submitted":
@@ -318,8 +341,12 @@ class StudentDashboardApp:
 
     def logout(self):
         confirm = messagebox.askyesno("Logout", "Are you sure you want to logout?")
+
         if confirm:
             self.root.destroy()
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            login_path = os.path.join(base_dir, "login.py")
+            subprocess.Popen([sys.executable, login_path])
 
 
 if __name__ == "__main__":

@@ -19,6 +19,15 @@ STATUS_DONE_BG = "#edf7ef"
 STATUS_DONE_FG = "#3f6b4b"
 
 
+def format_period(item):
+    start = item.get("evaluation_starts_at") or item.get("starts_at")
+    end = item.get("evaluation_ends_at") or item.get("ends_at")
+
+    if start and end:
+        return f"Evaluation Period: {start} to {end}"
+    return "Evaluation Period: Not available"
+
+
 def show_evaluations_page(app):
     container = tk.Frame(app.content_frame, bg=PAGE_BG)
     container.pack(fill="both", expand=True)
@@ -33,36 +42,44 @@ def show_evaluations_page(app):
 
     tk.Label(
         container,
-        text="View your enrolled subjects and evaluate your instructors.",
+        text="View your available evaluation subjects.",
         font=("Segoe UI", 10),
         fg=TEXT_MUTED,
         bg=PAGE_BG
     ).pack(anchor="w", padx=10, pady=(0, 15))
 
+    # If no subject has an OPEN evaluation period
     if not app.subjects_data:
         empty_box = tk.Frame(
             container,
             bg=CARD_BG,
             highlightthickness=1,
-            highlightbackground=BORDER,
-            bd=0
+            highlightbackground=BORDER
         )
         empty_box.pack(fill="x", padx=10, pady=10)
 
         tk.Label(
             empty_box,
-            text="No enrolled subjects found.",
-            font=("Segoe UI", 11),
+            text="There is no evaluation at the moment.",
+            font=("Segoe UI", 13, "bold"),
+            fg=TEXT_DARK,
+            bg=CARD_BG
+        ).pack(pady=(30, 8))
+
+        tk.Label(
+            empty_box,
+            text="Please wait until the evaluation period is opened.",
+            font=("Segoe UI", 10),
             fg=TEXT_MUTED,
-            bg=CARD_BG,
-            pady=20
-        ).pack()
+            bg=CARD_BG
+        ).pack(pady=(0, 30))
+
         return
 
-    evaluations_map = {
-        item["class_offering_id"]: item
-        for item in app.evaluations_data
-    }
+    evaluations_map = {}
+    for item in app.evaluations_data:
+        if item["class_offering_id"] not in evaluations_map:
+            evaluations_map[item["class_offering_id"]] = item
 
     cards_wrapper = tk.Frame(container, bg=PAGE_BG)
     cards_wrapper.pack(fill="both", expand=True)
@@ -139,6 +156,14 @@ def show_evaluations_page(app):
             fg=TEXT_MUTED,
             bg=CARD_BG
         ).pack(anchor="w")
+
+        tk.Label(
+            info_section,
+            text=format_period(item),
+            font=("Segoe UI", 9),
+            fg=TEXT_MUTED,
+            bg=CARD_BG
+        ).pack(anchor="w", pady=(6, 0))
 
         right_section = tk.Frame(top_section, bg=CARD_BG)
         right_section.pack(side="right", anchor="n", padx=(10, 0))
