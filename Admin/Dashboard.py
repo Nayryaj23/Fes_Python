@@ -14,8 +14,8 @@ from Admin.Pages.criteria_page import show_criteria_page
 from Admin.Pages.evaluation_page import show_evaluation_page
 from Admin.Pages.question_page import show_question_page
 from Admin.Pages.class_data_upload_page import show_class_data_upload_page
-# from Admin.Pages.faculty_page import show_faculty_page
-# from Admin.Pages.student_page import show_student_page
+
+
 
 
 BG_MAIN = "#f7f3f3"
@@ -168,13 +168,6 @@ class DashboardApp:
         self.clear_content()
         show_evaluation_page(self)
 
-    def show_faculty(self):
-        self.clear_content()
-        show_faculty_page(self)
-
-    def show_students(self):
-        self.clear_content()
-        show_student_page(self)
 
     def logout(self):
         confirm = messagebox.askyesno("Logout", "Are you sure you want to logout?")

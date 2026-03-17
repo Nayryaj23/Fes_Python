@@ -6,6 +6,7 @@ from tkinter import messagebox
 from db_connection import get_connection
 from auth import login_user
 from Admin.Dashboard import DashboardApp
+from Students.student_dashboard import StudentDashboardApp
 
 try:
     from PIL import Image, ImageTk
@@ -122,65 +123,7 @@ def open_student_dashboard(user):
     root.destroy()
 
     student_root = tk.Tk()
-    student_root.title("Student Dashboard")
-    student_root.configure(bg="#f7f3f3")
-    center_window(student_root, 1100, 700)
-
-    topbar = tk.Frame(student_root, bg="#6d3b3b", height=70)
-    topbar.pack(fill="x")
-    topbar.pack_propagate(False)
-
-    tk.Label(
-        topbar,
-        text="Student Dashboard",
-        font=("Segoe UI", 20, "bold"),
-        fg="white",
-        bg="#6d3b3b"
-    ).pack(side="left", padx=20, pady=15)
-
-    tk.Label(
-        topbar,
-        text=f"Welcome, {user['full_name']}",
-        font=("Segoe UI", 11),
-        fg="white",
-        bg="#6d3b3b"
-    ).pack(side="right", padx=20)
-
-    content = tk.Frame(student_root, bg="#fffafa")
-    content.pack(fill="both", expand=True, padx=20, pady=20)
-
-    tk.Label(
-        content,
-        text="You are logged in as Student.",
-        font=("Segoe UI", 18, "bold"),
-        fg="#4a2c2c",
-        bg="#fffafa"
-    ).pack(pady=(40, 10))
-
-    tk.Label(
-        content,
-        text="This is your student dashboard area.",
-        font=("Segoe UI", 11),
-        fg="#7a5c5c",
-        bg="#fffafa"
-    ).pack()
-
-    def logout():
-        confirm = messagebox.askyesno("Logout", "Are you sure you want to logout?")
-        if confirm:
-            student_root.destroy()
-            open_login()
-
-    tk.Button(
-        content,
-        text="Logout",
-        font=("Segoe UI", 10, "bold"),
-        bg=ACCENT,
-        fg="white",
-        relief="flat",
-        command=logout
-    ).pack(pady=20)
-
+    app = StudentDashboardApp(student_root, student_id=user["id"])
     student_root.mainloop()
 
 
