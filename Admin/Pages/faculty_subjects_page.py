@@ -11,38 +11,10 @@ ACCENT_HOVER = "#723939"
 BORDER = "#ddd0d0"
 ROW_ALT = "#fcf7f7"
 ROW_WHITE = "#ffffff"
-ACTION_TEXT = "[ View Subjects ]"
+ACTION_TEXT = "[ View Result ]"
 
 
-def get_active_evaluation_period():
-    conn = None
-    cursor = None
-    try:
-        conn = get_connection()
-        cursor = conn.cursor(dictionary=True)
-
-        query = """
-            SELECT id, term_id, form_id, starts_at, ends_at, status
-            FROM evaluation_periods
-            WHERE status = 'open'
-            ORDER BY starts_at DESC
-            LIMIT 1
-        """
-        cursor.execute(query)
-        return cursor.fetchone()
-
-    except Exception as e:
-        messagebox.showerror("Database Error", f"Failed to load active evaluation period.\n\n{e}")
-        return None
-
-    finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            conn.close()
-
-
-def fetch_faculty_by_active_period(evaluation_period_id, search_text=""):
+def fetch_subjects_of_faculty_in_period(evaluation_period_id, faculty_id, search_text=""):
     conn = None
     cursor = None
     try:
@@ -51,34 +23,36 @@ def fetch_faculty_by_active_period(evaluation_period_id, search_text=""):
 
         query = """
             SELECT
-                u.id AS faculty_id,
-                COALESCE(fp.employee_no, '') AS employee_no,
-                COALESCE(up.first_name, '') AS first_name,
-                COALESCE(up.middle_name, '') AS middle_name,
-                COALESCE(up.last_name, '') AS last_name,
-                COALESCE(u.email, '') AS email,
-                COALESCE(d.name, 'No Department') AS department
+                co.id AS class_offering_id,
+                s.subject_code,
+                s.descriptive_title,
+                sec.year_level,
+                sec.section_name,
+                sem.name AS semester,
+                sy.year_label AS school_year,
+                COALESCE(co.schedule, '') AS schedule
             FROM evaluations e
             INNER JOIN class_offerings co ON co.id = e.class_offering_id
-            INNER JOIN users u ON u.id = co.faculty_id
-            INNER JOIN faculty_profiles fp ON fp.user_id = u.id
-            LEFT JOIN user_profiles up ON up.user_id = u.id
-            LEFT JOIN departments d ON d.id = fp.department_id
+            INNER JOIN subjects s ON s.id = co.subject_id
+            INNER JOIN sections sec ON sec.id = co.section_id
+            INNER JOIN terms t ON t.id = co.term_id
+            INNER JOIN semesters sem ON sem.id = t.semester_id
+            INNER JOIN school_years sy ON sy.id = t.school_year_id
             WHERE e.evaluation_period_id = %s
-              AND u.user_type = 'faculty'
+              AND co.faculty_id = %s
         """
 
-        params = [evaluation_period_id]
+        params = [evaluation_period_id, faculty_id]
 
         if search_text.strip():
             query += """
                 AND (
-                    fp.employee_no LIKE %s
-                    OR up.first_name LIKE %s
-                    OR up.middle_name LIKE %s
-                    OR up.last_name LIKE %s
-                    OR u.email LIKE %s
-                    OR d.name LIKE %s
+                    s.subject_code LIKE %s
+                    OR s.descriptive_title LIKE %s
+                    OR sec.section_name LIKE %s
+                    OR sem.name LIKE %s
+                    OR sy.year_label LIKE %s
+                    OR co.schedule LIKE %s
                 )
             """
             like_value = f"%{search_text.strip()}%"
@@ -86,23 +60,25 @@ def fetch_faculty_by_active_period(evaluation_period_id, search_text=""):
 
         query += """
             GROUP BY
-                u.id,
-                fp.employee_no,
-                up.first_name,
-                up.middle_name,
-                up.last_name,
-                u.email,
-                d.name
+                co.id,
+                s.subject_code,
+                s.descriptive_title,
+                sec.year_level,
+                sec.section_name,
+                sem.name,
+                sy.year_label,
+                co.schedule
             ORDER BY
-                last_name ASC,
-                first_name ASC
+                s.subject_code ASC,
+                sec.year_level ASC,
+                sec.section_name ASC
         """
 
         cursor.execute(query, params)
         return cursor.fetchall()
 
     except Exception as e:
-        messagebox.showerror("Database Error", f"Failed to load faculty list.\n\n{e}")
+        messagebox.showerror("Database Error", f"Failed to load subject list.\n\n{e}")
         return []
 
     finally:
@@ -112,21 +88,19 @@ def fetch_faculty_by_active_period(evaluation_period_id, search_text=""):
             conn.close()
 
 
-def show_faculty_page(app):
+def show_faculty_subjects_page(app):
     parent = app.content_frame
 
     for widget in parent.winfo_children():
         widget.destroy()
 
-    active_period = get_active_evaluation_period()
-
-    if not active_period:
+    if not getattr(app, "selected_faculty_id", None):
         empty_frame = tk.Frame(parent, bg=BG_MAIN)
         empty_frame.pack(fill="both", expand=True)
 
         tk.Label(
             empty_frame,
-            text="No Active Evaluation Period",
+            text="No Faculty Selected",
             font=("Segoe UI", 22, "bold"),
             bg=BG_MAIN,
             fg=TEXT_DARK
@@ -134,58 +108,74 @@ def show_faculty_page(app):
 
         tk.Label(
             empty_frame,
-            text="Please open an evaluation period first before viewing faculty records.",
+            text="Please select a faculty first before viewing handled subjects.",
             font=("Segoe UI", 11),
             bg=BG_MAIN,
             fg=TEXT_MUTED
         ).pack()
         return
 
-    app.active_evaluation_period_id = active_period["id"]
-    app.active_term_id = active_period["term_id"]
-
-    def format_name(row):
-        first_name = (row.get("first_name") or "").strip()
-        middle_name = (row.get("middle_name") or "").strip()
-        last_name = (row.get("last_name") or "").strip()
-        middle_initial = f"{middle_name[0]}." if middle_name else ""
-        return " ".join(f"{last_name}, {first_name} {middle_initial}".split())
-
-    def open_subjects_from_values(values):
+    def open_result_from_values(values):
         if not values:
             return
 
-        faculty_name = values[1]  # because ID column is removed
-        matched_faculty = None
+        subject_code = values[0]
+        subject_title = values[1]
 
-        for row in faculty_cache:
-            if format_name(row) == faculty_name:
-                matched_faculty = row
+        matched_subject = None
+        for row in subject_cache:
+            if row["subject_code"] == subject_code and row["descriptive_title"] == subject_title:
+                matched_subject = row
                 break
 
-        if not matched_faculty:
-            messagebox.showwarning("Selection Error", "Unable to determine selected faculty.")
+        if not matched_subject:
+            messagebox.showwarning("Selection Error", "Unable to determine selected subject.")
             return
 
-        app.selected_faculty_id = matched_faculty["faculty_id"]
-        app.selected_faculty_name = faculty_name
-        app.show_faculty_subjects_page()
+        app.selected_class_offering_id = matched_subject["class_offering_id"]
+        app.selected_subject_name = f"{matched_subject['subject_code']} - {matched_subject['descriptive_title']}"
+        app.show_evaluation_result_page()
 
     # ================= HEADER =================
     header_frame = tk.Frame(parent, bg=BG_MAIN)
     header_frame.pack(fill="x", pady=(0, 14))
 
+    top_header_row = tk.Frame(header_frame, bg=BG_MAIN)
+    top_header_row.pack(fill="x")
+
+    def go_back():
+        app.show_faculty_page()
+
+    tk.Button(
+        top_header_row,
+        text="← Back",
+        font=("Segoe UI", 10, "bold"),
+        bg="#6c757d",
+        fg="white",
+        activebackground="#5b636a",
+        activeforeground="white",
+        relief="flat",
+        bd=0,
+        padx=14,
+        pady=7,
+        cursor="hand2",
+        command=go_back
+    ).pack(side="left")
+
+    title_frame = tk.Frame(header_frame, bg=BG_MAIN)
+    title_frame.pack(fill="x", pady=(12, 0))
+
     tk.Label(
-        header_frame,
-        text="Faculty List",
+        title_frame,
+        text="Subject List",
         font=("Segoe UI", 20, "bold"),
         bg=BG_MAIN,
         fg=TEXT_DARK
     ).pack(anchor="w")
 
     tk.Label(
-        header_frame,
-        text="Faculty included in the active evaluation period",
+        title_frame,
+        text=f"Handled subjects of {app.selected_faculty_name} in the active evaluation period",
         font=("Segoe UI", 10),
         bg=BG_MAIN,
         fg=TEXT_MUTED
@@ -207,7 +197,7 @@ def show_faculty_page(app):
 
     tk.Label(
         search_inner,
-        text="Search Faculty",
+        text="Search Subject",
         font=("Segoe UI", 10, "bold"),
         bg=CARD_BG,
         fg=TEXT_DARK
@@ -240,7 +230,7 @@ def show_faculty_page(app):
 
     tk.Label(
         top_info_frame,
-        text="Click the action button in the same row to view the handled subjects.",
+        text="Click the action button in the same row to view the evaluation result.",
         font=("Segoe UI", 10),
         bg=CARD_BG,
         fg=TEXT_MUTED
@@ -249,19 +239,21 @@ def show_faculty_page(app):
     table_frame = tk.Frame(table_card, bg=CARD_BG)
     table_frame.pack(fill="both", expand=True, padx=16, pady=(0, 16))
 
-    columns = ("employee_no", "name", "email", "department", "action")
+    columns = ("subject_code", "title", "section", "schedule", "term", "action")
     tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=16)
 
-    tree.heading("employee_no", text="Employee No")
-    tree.heading("name", text="Faculty Name")
-    tree.heading("email", text="Email")
-    tree.heading("department", text="Department")
+    tree.heading("subject_code", text="Subject Code")
+    tree.heading("title", text="Descriptive Title")
+    tree.heading("section", text="Section")
+    tree.heading("schedule", text="Schedule")
+    tree.heading("term", text="Term")
     tree.heading("action", text="Action")
 
-    tree.column("employee_no", width=140, anchor="center")
-    tree.column("name", width=240, anchor="center")
-    tree.column("email", width=260, anchor="center")
-    tree.column("department", width=180, anchor="center")
+    tree.column("subject_code", width=120, anchor="center")
+    tree.column("title", width=280, anchor="center")
+    tree.column("section", width=120, anchor="center")
+    tree.column("schedule", width=180, anchor="center")
+    tree.column("term", width=180, anchor="center")
     tree.column("action", width=150, anchor="center")
 
     y_scroll = ttk.Scrollbar(table_frame, orient="vertical", command=tree.yview)
@@ -305,11 +297,9 @@ def show_faculty_page(app):
 
     tree.tag_configure("evenrow", background=ROW_WHITE)
     tree.tag_configure("oddrow", background=ROW_ALT)
-    tree.tag_configure("action_even", background=ROW_WHITE, foreground=ACCENT)
-    tree.tag_configure("action_odd", background=ROW_ALT, foreground=ACCENT)
 
-    faculty_cache = []
-    selected_label_var = tk.StringVar(value="No faculty selected")
+    subject_cache = []
+    selected_label_var = tk.StringVar(value="No subject selected")
 
     bottom_frame = tk.Frame(parent, bg=BG_MAIN)
     bottom_frame.pack(fill="x", pady=(10, 0))
@@ -325,45 +315,49 @@ def show_faculty_page(app):
     button_group = tk.Frame(bottom_frame, bg=BG_MAIN)
     button_group.pack(side="right")
 
-    def load_faculty():
-        nonlocal faculty_cache
+    def load_subjects():
+        nonlocal subject_cache
         tree.delete(*tree.get_children())
 
-        faculty_cache = fetch_faculty_by_active_period(
+        subject_cache = fetch_subjects_of_faculty_in_period(
             app.active_evaluation_period_id,
+            app.selected_faculty_id,
             search_var.get()
         )
 
-        if not faculty_cache:
-            selected_label_var.set("No faculty found for the active evaluation period.")
+        if not subject_cache:
+            selected_label_var.set("No subjects found for the selected faculty.")
             return
 
-        for index, row in enumerate(faculty_cache):
+        for index, row in enumerate(subject_cache):
             row_tag = "evenrow" if index % 2 == 0 else "oddrow"
+            section_text = f"Y{row['year_level']}-{row['section_name']}"
+            term_text = f"{row['semester']} | {row['school_year']}"
 
             tree.insert(
                 "",
                 "end",
                 values=(
-                    row["employee_no"],
-                    format_name(row),
-                    row["email"],
-                    row["department"],
+                    row["subject_code"],
+                    row["descriptive_title"],
+                    section_text,
+                    row["schedule"],
+                    term_text,
                     ACTION_TEXT
                 ),
                 tags=(row_tag,)
             )
 
-        selected_label_var.set("Click [ View Subjects ] in the Action column.")
+        selected_label_var.set("Click [ View Result ] in the Action column.")
 
     def on_select(event=None):
         selected = tree.selection()
         if not selected:
-            selected_label_var.set("No faculty selected")
+            selected_label_var.set("No subject selected")
             return
 
         values = tree.item(selected[0], "values")
-        selected_label_var.set(f"Selected Faculty: {values[1]}")
+        selected_label_var.set(f"Selected Subject: {values[0]} - {values[1]}")
 
     def on_tree_click(event):
         region = tree.identify("region", event.x, event.y)
@@ -379,9 +373,9 @@ def show_faculty_page(app):
         tree.selection_set(item_id)
         values = tree.item(item_id, "values")
 
-        # action column is now #5
-        if column_id == "#5":
-            open_subjects_from_values(values)
+        # Action column = #6
+        if column_id == "#6":
+            open_result_from_values(values)
 
     def on_tree_double_click(event):
         item_id = tree.identify_row(event.y)
@@ -389,11 +383,30 @@ def show_faculty_page(app):
             return
 
         values = tree.item(item_id, "values")
-        open_subjects_from_values(values)
+        open_result_from_values(values)
 
     def refresh_data():
         search_var.set("")
-        load_faculty()
+        load_subjects()
+
+    def go_back():
+        app.show_faculty_page()
+
+    tk.Button(
+        button_group,
+        text="Back",
+        font=("Segoe UI", 10, "bold"),
+        bg="#6c757d",
+        fg="white",
+        activebackground="#5b636a",
+        activeforeground="white",
+        relief="flat",
+        bd=0,
+        padx=16,
+        pady=8,
+        cursor="hand2",
+        command=go_back
+    ).pack(side="left", padx=(0, 8))
 
     tk.Button(
         button_group,
@@ -408,7 +421,7 @@ def show_faculty_page(app):
         padx=16,
         pady=8,
         cursor="hand2",
-        command=load_faculty
+        command=load_subjects
     ).pack(side="left", padx=(0, 8))
 
     tk.Button(
@@ -427,9 +440,9 @@ def show_faculty_page(app):
         command=refresh_data
     ).pack(side="left")
 
-    search_entry.bind("<Return>", lambda e: load_faculty())
+    search_entry.bind("<Return>", lambda e: load_subjects())
     tree.bind("<<TreeviewSelect>>", on_select)
     tree.bind("<Button-1>", on_tree_click)
     tree.bind("<Double-1>", on_tree_double_click)
 
-    load_faculty()
+    load_subjects()

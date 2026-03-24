@@ -3,9 +3,6 @@ import subprocess
 import sys
 import os
 from tkinter import messagebox
-
-
-from Admin.Pages import faculty_page
 from sidebar import Sidebar
 
 from Admin.Pages.dashboard_page import show_dashboard_page
@@ -14,8 +11,10 @@ from Admin.Pages.criteria_page import show_criteria_page
 from Admin.Pages.evaluation_page import show_evaluation_page
 from Admin.Pages.question_page import show_question_page
 from Admin.Pages.class_data_upload_page import show_class_data_upload_page
-
-
+from Admin.Pages.faculty_page import show_faculty_page
+from Admin.Pages.faculty_subjects_page import show_faculty_subjects_page
+from Admin.Pages.evaluation_result_page import show_evaluation_result_page
+from Admin.Pages.student_page import show_students_page
 
 
 BG_MAIN = "#f7f3f3"
@@ -40,7 +39,14 @@ class DashboardApp:
         self.root.configure(bg=BG_MAIN)
         self.root.state("zoomed")
 
-        # Shared data
+        # Shared state for faculty -> subjects -> result flow
+        self.selected_faculty_id = None
+        self.selected_faculty_name = None
+        self.selected_class_offering_id = None
+        self.selected_subject_name = None
+        self.active_evaluation_period_id = None
+        self.active_term_id = None
+
         self.criteria_data = [
             {
                 "name": "Teaching Effectiveness",
@@ -78,7 +84,7 @@ class DashboardApp:
             title="Admin Panel",
             menu_items={
                 "Main": ["Dashboard"],
-                "Management": ["Evaluation Form","Criteria", "Question", "Class Data Upload", "Evaluation"],
+                "Management": ["Evaluation Form", "Criteria", "Question", "Class Data Upload", "Evaluation"],
                 "People": ["Faculty", "Students"],
             },
             on_menu_click=self.handle_menu_click,
@@ -100,7 +106,7 @@ class DashboardApp:
             fg=TEXT_DARK,
             bg=TOPBAR_BG
         )
-        self.page_title.pack(side="left", padx=25, pady=15)
+        # self.page_title.pack(side="left", padx=25, pady=15)
 
         self.user_label = tk.Label(
             self.topbar,
@@ -138,9 +144,9 @@ class DashboardApp:
         elif item == "Evaluation":
             self.show_evaluation()
         elif item == "Faculty":
-            self.show_faculty()
+            self.show_faculty_page()
         elif item == "Students":
-            self.show_students()
+            self.show_students_page()
         elif item == "Logout":
             self.logout()
 
@@ -168,21 +174,30 @@ class DashboardApp:
         self.clear_content()
         show_evaluation_page(self)
 
+    def show_faculty_page(self):
+        self.clear_content()
+        show_faculty_page(self)
+
+    def show_faculty_subjects_page(self):
+        self.clear_content()
+        show_faculty_subjects_page(self)
+
+    def show_evaluation_result_page(self):
+        self.clear_content()
+        show_evaluation_result_page(self)
+
+    def show_students_page(self):
+        self.clear_content()
+        show_students_page(self)
 
     def logout(self):
         confirm = messagebox.askyesno("Logout", "Are you sure you want to logout?")
 
         if confirm:
-            # Close dashboard window
             self.root.destroy()
 
-            # Get project root (one level above Admin)
             base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-            # Build path to login.py
             login_path = os.path.join(base_dir, "login.py")
-
-            # Open login window again
             subprocess.Popen([sys.executable, login_path])
 
 
